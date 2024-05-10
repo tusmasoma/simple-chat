@@ -3,21 +3,26 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 )
 
 func main() {
-	// Create a new server and set the handler
+	var addr string
+	flag.StringVar(&addr, "addr", ":8083", "tcp host:port to connect")
+	flag.Parse()
+
 	srv := &http.Server{
-		Addr: ":8080",
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("Hello, World!"))
-		}),
+		Addr:    addr,
+		Handler: Init(),
 	}
 
 	/* ===== サーバの起動 ===== */
@@ -43,4 +48,22 @@ func main() {
 		log.Println("failed to shutdown http server", err)
 	}
 	log.Println("Server exited")
+}
+
+func Init() *chi.Mux {
+	r := chi.NewRouter()
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"https://*", "http://*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Origin"},
+		ExposedHeaders:   []string{"Link", "Authorization"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
+
+	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
+		ServeWs(w, r)
+	})
+
+	return r
 }
