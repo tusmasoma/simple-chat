@@ -61,8 +61,11 @@ func Init() *chi.Mux {
 		MaxAge:           300,
 	}))
 
+	wsServer := NewWebsocketServer()
+	go wsServer.Run()
+
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		ServeWs(w, r)
+		ServeWs(wsServer, w, r)
 	})
 
 	return r
