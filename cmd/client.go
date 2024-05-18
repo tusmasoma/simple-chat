@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
@@ -38,13 +39,17 @@ type Client struct {
 	conn     *websocket.Conn
 	wsServer *WsServer
 	send     chan []byte
+	rooms    map[*Room]bool
+	Name     string `json:"name"`
 }
 
-func newClient(conn *websocket.Conn, wsServer *WsServer) *Client {
+func newClient(conn *websocket.Conn, wsServer *WsServer, name string) *Client {
 	return &Client{
 		conn:     conn,
 		wsServer: wsServer,
 		send:     make(chan []byte, 256),
+		rooms:    make(map[*Room]bool),
+		Name:     name,
 	}
 }
 
@@ -67,7 +72,7 @@ func (client *Client) readPump() {
 			break
 		}
 
-		client.wsServer.broadcast <- jsonMessage
+		client.handleNewMessage(jsonMessage)
 	}
 
 }
@@ -115,12 +120,66 @@ func (client *Client) writePump() {
 
 func (client *Client) disconnect() {
 	client.wsServer.unregister <- client
+	for room := range client.rooms {
+		room.unregister <- client
+	}
 	close(client.send)
 	client.conn.Close()
 }
 
+func (client *Client) handleNewMessage(jsonMessage []byte) {
+	var message Message
+	if err := json.Unmarshal(jsonMessage, &message); err != nil {
+		log.Printf("Error on unmarshalling JSON message: %v", err)
+		return
+	}
+
+	// Attach the client object as the sender of the message.
+	message.Sender = client
+
+	switch message.Action {
+	case SendMessageAction:
+		roomName := message.Target
+		if room := client.wsServer.findRoom(roomName); room != nil {
+			room.broadcast <- &message
+		}
+	case JoinRoomAction:
+		client.handleJoinRoomMessage(message)
+	case LeaveRoomAction:
+		client.handleLeaveRoomMessage(message)
+	}
+}
+
+func (client *Client) handleJoinRoomMessage(message Message) {
+	roomName := message.Target
+	room := client.wsServer.findRoom(roomName)
+	if room == nil {
+		room = client.wsServer.createRoom(roomName)
+	}
+
+	client.rooms[room] = true
+
+	room.register <- client
+}
+
+func (client *Client) handleLeaveRoomMessage(message Message) {
+	roomName := message.Target
+	room := client.wsServer.findRoom(roomName)
+	if _, ok := client.rooms[room]; ok {
+		delete(client.rooms, room)
+	}
+
+	room.unregister <- client
+}
+
 // ServeWs handles websocket requests from clients requests.
 func ServeWs(wsServer *WsServer, w http.ResponseWriter, r *http.Request) {
+
+	name, ok := r.URL.Query()["name"]
+	if !ok || len(name) < 1 {
+		http.Error(w, "Url Param 'name' is missing", http.StatusBadRequest)
+		return
+	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -128,7 +187,7 @@ func ServeWs(wsServer *WsServer, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := newClient(conn, wsServer)
+	client := newClient(conn, wsServer, name[0])
 
 	go client.writePump()
 	go client.readPump()
