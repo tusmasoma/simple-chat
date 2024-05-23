@@ -1,11 +1,18 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/google/uuid"
+)
 
 const welcomeMessage = "%s joined the room"
+const goodbyeMessage = "%s left the room"
 
 type Room struct {
-	name       string
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name"`
+	Private    bool      `json:"private"`
 	clients    map[*Client]bool
 	register   chan *Client
 	unregister chan *Client
@@ -13,9 +20,11 @@ type Room struct {
 }
 
 // NewRoom creates a new Room
-func NewRoom(name string) *Room {
+func NewRoom(name string, private bool) *Room {
 	return &Room{
-		name:       name,
+		ID:         uuid.New(),
+		Name:       name,
+		Private:    private,
 		clients:    make(map[*Client]bool),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
@@ -41,7 +50,9 @@ func (room *Room) Run() {
 }
 
 func (room *Room) registerClientInRoom(client *Client) {
-	room.notifyClientJoined(client)
+	if !room.Private {
+		room.notifyClientJoined(client)
+	}
 	room.clients[client] = true
 }
 
@@ -61,7 +72,7 @@ func (room *Room) notifyClientJoined(client *Client) {
 	message := &Message{
 		Action:  SendMessageAction,
 		Message: fmt.Sprintf(welcomeMessage, client.Name),
-		Target:  room.name,
+		Target:  room,
 		Sender:  client,
 	}
 

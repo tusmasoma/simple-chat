@@ -6,15 +6,19 @@ import (
 )
 
 const (
-	SendMessageAction = "send_message"
-	JoinRoomAction    = "join_room"
-	LeaveRoomAction   = "leave_room"
+	SendMessageAction     = "send_message"
+	JoinRoomAction        = "join_room"
+	LeaveRoomAction       = "leave_room"
+	UserJoinedAction      = "user_joined"
+	UserLeftAction        = "user_left"
+	JoinRoomPrivateAction = "join_room_private"
+	RoomJoinedAction      = "room-joined"
 )
 
 type Message struct {
 	Action  string  `json:"action"`
 	Message string  `json:"message"`
-	Target  string  `json:"target"`
+	Target  *Room   `json:"target"`
 	Sender  *Client `json:"sender"`
 }
 
