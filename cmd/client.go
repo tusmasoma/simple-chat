@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -35,16 +37,22 @@ var upgrader = websocket.Upgrader{
 // Client represents the websocket client at the server
 type Client struct {
 	// The actual websocket connection.
+	ID       uuid.UUID `json:"id"`
 	conn     *websocket.Conn
 	wsServer *WsServer
 	send     chan []byte
+	rooms    map[*Room]bool
+	Name     string `json:"name"`
 }
 
-func newClient(conn *websocket.Conn, wsServer *WsServer) *Client {
+func newClient(conn *websocket.Conn, wsServer *WsServer, name string) *Client {
 	return &Client{
+		ID:       uuid.New(),
 		conn:     conn,
 		wsServer: wsServer,
 		send:     make(chan []byte, 256),
+		rooms:    make(map[*Room]bool),
+		Name:     name,
 	}
 }
 
@@ -67,7 +75,7 @@ func (client *Client) readPump() {
 			break
 		}
 
-		client.wsServer.broadcast <- jsonMessage
+		client.handleNewMessage(jsonMessage)
 	}
 
 }
@@ -115,12 +123,110 @@ func (client *Client) writePump() {
 
 func (client *Client) disconnect() {
 	client.wsServer.unregister <- client
+	for room := range client.rooms {
+		room.unregister <- client
+	}
 	close(client.send)
 	client.conn.Close()
 }
 
+func (client *Client) handleNewMessage(jsonMessage []byte) {
+	var message Message
+	if err := json.Unmarshal(jsonMessage, &message); err != nil {
+		log.Printf("Error on unmarshalling JSON message: %v", err)
+		return
+	}
+
+	// Attach the client object as the sender of the message.
+	message.Sender = client
+
+	switch message.Action {
+	case SendMessageAction:
+		roomID := message.Target.ID.String()
+		if room := client.wsServer.findRoomByID(roomID); room != nil {
+			room.broadcast <- &message
+		}
+	case JoinRoomAction:
+		client.handleJoinRoomMessage(message)
+	case LeaveRoomAction:
+		client.handleLeaveRoomMessage(message)
+	case JoinRoomPrivateAction:
+		client.handleJoinRoomMessage(message)
+	}
+}
+
+func (client *Client) handleJoinRoomMessage(message Message) {
+	roomName := message.Message
+
+	client.joinRoom(roomName, nil)
+}
+
+func (client *Client) handleLeaveRoomMessage(message Message) {
+	room := client.wsServer.findRoomByID(message.Message)
+	if room == nil {
+		return
+	}
+	if _, ok := client.rooms[room]; ok {
+		delete(client.rooms, room)
+	}
+
+	room.unregister <- client
+}
+
+func (client *Client) handleJoinRoomPrivateMessage(message Message) {
+	target := client.wsServer.findClientByID(message.Message)
+	if target == nil {
+		return
+	}
+
+	roomName := message.Message + client.ID.String()
+
+	client.joinRoom(roomName, target)
+	target.joinRoom(roomName, client)
+}
+
+func (client *Client) joinRoom(roomName string, sender *Client) {
+	room := client.wsServer.findRoomByName(roomName)
+	if room == nil {
+		room = client.wsServer.createRoom(roomName, sender != nil)
+	}
+
+	if sender == nil && room.Private {
+		return
+	}
+
+	if !client.isInRoom(room) {
+		client.rooms[room] = true
+		room.register <- client
+		client.notifyRoomJoined(room, sender)
+	}
+}
+
+func (client *Client) isInRoom(room *Room) bool {
+	if _, ok := client.rooms[room]; ok {
+		return true
+	}
+	return false
+}
+
+func (client *Client) notifyRoomJoined(room *Room, sender *Client) {
+	message := Message{
+		Action: RoomJoinedAction,
+		Target: room,
+		Sender: sender,
+	}
+
+	client.send <- message.encode()
+}
+
 // ServeWs handles websocket requests from clients requests.
 func ServeWs(wsServer *WsServer, w http.ResponseWriter, r *http.Request) {
+
+	name, ok := r.URL.Query()["name"]
+	if !ok || len(name) < 1 {
+		http.Error(w, "Url Param 'name' is missing", http.StatusBadRequest)
+		return
+	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -128,7 +234,7 @@ func ServeWs(wsServer *WsServer, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := newClient(conn, wsServer)
+	client := newClient(conn, wsServer, name[0])
 
 	go client.writePump()
 	go client.readPump()
