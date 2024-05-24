@@ -69,11 +69,12 @@ func (room *Room) broadcastToClientsInRoom(message []byte) {
 }
 
 func (room *Room) notifyClientJoined(client *Client) {
+	user := client.ToUser()
 	message := &Message{
 		Action:  SendMessageAction,
 		Message: fmt.Sprintf(welcomeMessage, client.Name),
 		Target:  room,
-		Sender:  client,
+		Sender:  user,
 	}
 
 	room.broadcastToClientsInRoom(message.encode())

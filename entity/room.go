@@ -1,7 +1,9 @@
 package entity
 
+import "github.com/google/uuid"
+
 type Room struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Private bool   `json:"private"`
+	ID      uuid.UUID `json:"id"`
+	Name    string    `json:"name"`
+	Private bool      `json:"private"`
 }

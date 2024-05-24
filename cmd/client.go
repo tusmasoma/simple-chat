@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/tusmasoma/simple-chat/entity"
 )
 
 const (
@@ -53,6 +54,13 @@ func newClient(conn *websocket.Conn, wsServer *WsServer, name string) *Client {
 		send:     make(chan []byte, 256),
 		rooms:    make(map[*Room]bool),
 		Name:     name,
+	}
+}
+
+func (c *Client) ToUser() *entity.User {
+	return &entity.User{
+		ID:   c.ID,
+		Name: c.Name,
 	}
 }
 
@@ -138,7 +146,7 @@ func (client *Client) handleNewMessage(jsonMessage []byte) {
 	}
 
 	// Attach the client object as the sender of the message.
-	message.Sender = client
+	message.Sender = client.ToUser()
 
 	switch message.Action {
 	case SendMessageAction:
@@ -181,11 +189,11 @@ func (client *Client) handleJoinRoomPrivateMessage(message Message) {
 
 	roomName := message.Message + client.ID.String()
 
-	client.joinRoom(roomName, target)
-	target.joinRoom(roomName, client)
+	client.joinRoom(roomName, target.ToUser())
+	target.joinRoom(roomName, client.ToUser())
 }
 
-func (client *Client) joinRoom(roomName string, sender *Client) {
+func (client *Client) joinRoom(roomName string, sender *entity.User) {
 	room := client.wsServer.findRoomByName(roomName)
 	if room == nil {
 		room = client.wsServer.createRoom(roomName, sender != nil)
@@ -209,7 +217,7 @@ func (client *Client) isInRoom(room *Room) bool {
 	return false
 }
 
-func (client *Client) notifyRoomJoined(room *Room, sender *Client) {
+func (client *Client) notifyRoomJoined(room *Room, sender *entity.User) {
 	message := Message{
 		Action: RoomJoinedAction,
 		Target: room,

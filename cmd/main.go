@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/tusmasoma/simple-chat/config"
+	"github.com/tusmasoma/simple-chat/repository/sqlite"
 )
 
 func main() {
@@ -21,12 +22,11 @@ func main() {
 	flag.StringVar(&addr, "addr", ":8083", "tcp host:port to connect")
 	flag.Parse()
 
-	db := config.InitDB()
-	defer db.Close()
+	ctx := context.Background()
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: Init(),
+		Handler: Init(ctx),
 	}
 
 	/* ===== サーバの起動 ===== */
@@ -54,7 +54,13 @@ func main() {
 	log.Println("Server exited")
 }
 
-func Init() *chi.Mux {
+func Init(ctx context.Context) *chi.Mux {
+	db := config.InitDB()
+	defer db.Close()
+
+	userRepo := sqlite.NewUserRepository(db)
+	roomRepo := sqlite.NewRoomRepository(db)
+
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*"},
@@ -65,7 +71,7 @@ func Init() *chi.Mux {
 		MaxAge:           300,
 	}))
 
-	wsServer := NewWebsocketServer()
+	wsServer := NewWebsocketServer(ctx, roomRepo, userRepo)
 	go wsServer.Run()
 
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {

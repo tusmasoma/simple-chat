@@ -52,8 +52,8 @@ func (repo *userRepository) FindUserById(ctx context.Context, ID string) *entity
 	return &user
 }
 
-func (repo *userRepository) GetAllUsers(ctx context.Context) []entity.User {
-	var users []entity.User
+func (repo *userRepository) GetAllUsers(ctx context.Context) []*entity.User {
+	var users []*entity.User
 	rows, err := repo.db.QueryContext(ctx, "SELECT id, name FROM user")
 	if err != nil {
 		log.Println(err)
@@ -67,7 +67,7 @@ func (repo *userRepository) GetAllUsers(ctx context.Context) []entity.User {
 			log.Println(err)
 			return nil
 		}
-		users = append(users, user)
+		users = append(users, &user)
 	}
 	return users
 }
