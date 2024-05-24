@@ -6,7 +6,7 @@ import (
 	"log"
 
 	"github.com/google/uuid"
-	"github.com/tusmasoma/simple-chat/config"
+	"github.com/tusmasoma/simple-chat/repository"
 )
 
 const welcomeMessage = "%s joined the room"
@@ -20,10 +20,11 @@ type Room struct {
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan *Message
+	pubsubRepo repository.PubSubRepository
 }
 
 // NewRoom creates a new Room
-func NewRoom(name string, private bool) *Room {
+func NewRoom(name string, private bool, pubsubRepo repository.PubSubRepository) *Room {
 	return &Room{
 		ID:         uuid.New(),
 		Name:       name,
@@ -32,6 +33,7 @@ func NewRoom(name string, private bool) *Room {
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		broadcast:  make(chan *Message),
+		pubsubRepo: pubsubRepo,
 	}
 }
 
@@ -88,14 +90,14 @@ func (room *Room) notifyClientJoined(client *Client) {
 
 // TODO: ここでは、チャンネルをroomの名前にしている。一意せいないので命名考える
 func (room *Room) publishRoomMessage(ctx context.Context, message []byte) {
-	err := config.Redis.Publish(ctx, room.Name, message)
+	err := room.pubsubRepo.Publish(ctx, room.Name, message)
 	if err != nil {
 		log.Print(err)
 	}
 }
 
 func (room *Room) subscribeToRoomMessages(ctx context.Context) {
-	pubsub := config.Redis.Subscribe(ctx, room.Name)
+	pubsub := room.pubsubRepo.Subscribe(ctx, room.Name)
 
 	ch := pubsub.Channel()
 

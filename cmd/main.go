@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/tusmasoma/simple-chat/config"
+	"github.com/tusmasoma/simple-chat/repository/redis"
 	"github.com/tusmasoma/simple-chat/repository/sqlite"
 )
 
@@ -58,8 +59,12 @@ func Init(ctx context.Context) *chi.Mux {
 	db := config.InitDB()
 	defer db.Close()
 
+	client := config.NewClient()
+
 	userRepo := sqlite.NewUserRepository(db)
 	roomRepo := sqlite.NewRoomRepository(db)
+
+	pubsubRepo := redis.NewPubSubRepository(client)
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
@@ -71,11 +76,11 @@ func Init(ctx context.Context) *chi.Mux {
 		MaxAge:           300,
 	}))
 
-	wsServer := NewWebsocketServer(ctx, roomRepo, userRepo)
+	wsServer := NewWebsocketServer(ctx, roomRepo, userRepo, pubsubRepo)
 	go wsServer.Run()
 
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		ServeWs(wsServer, w, r)
+		ServeWs(wsServer, w, r, pubsubRepo)
 	})
 
 	return r

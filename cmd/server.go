@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/tusmasoma/simple-chat/config"
 	"github.com/tusmasoma/simple-chat/entity"
 	"github.com/tusmasoma/simple-chat/repository"
 )
@@ -22,10 +21,11 @@ type WsServer struct {
 	users      []*entity.User
 	roomRepo   repository.RoomRepository
 	userRepo   repository.UserRepository
+	pubsubRepo repository.PubSubRepository
 }
 
 // NewWebsocketServer creates a new WsServer type
-func NewWebsocketServer(ctx context.Context, roomRepo repository.RoomRepository, userRepo repository.UserRepository) *WsServer {
+func NewWebsocketServer(ctx context.Context, roomRepo repository.RoomRepository, userRepo repository.UserRepository, pubsubRepo repository.PubSubRepository) *WsServer {
 	wsServer := &WsServer{
 		clients:    make(map[*Client]bool),
 		register:   make(chan *Client),
@@ -34,6 +34,7 @@ func NewWebsocketServer(ctx context.Context, roomRepo repository.RoomRepository,
 		rooms:      make(map[*Room]bool),
 		roomRepo:   roomRepo,
 		userRepo:   userRepo,
+		pubsubRepo: pubsubRepo,
 	}
 
 	wsServer.users = userRepo.GetAllUsers(ctx)
@@ -107,7 +108,7 @@ func (s *WsServer) runRoomFromRepository(name string) *Room {
 	var room *Room
 	roomEntity := s.roomRepo.FindRoomByName(context.Background(), name)
 	if roomEntity != nil {
-		room = NewRoom(roomEntity.Name, roomEntity.Private)
+		room = NewRoom(roomEntity.Name, roomEntity.Private, s.pubsubRepo)
 		room.ID = roomEntity.ID
 
 		go room.Run()
@@ -135,7 +136,7 @@ func (s *WsServer) findClientByID(id string) *Client {
 }
 
 func (s *WsServer) createRoom(name string, private bool) *Room {
-	room := NewRoom(name, private)
+	room := NewRoom(name, private, s.pubsubRepo)
 
 	s.roomRepo.AddRoom(context.Background(), entity.Room{
 		ID:      room.ID,
@@ -185,7 +186,7 @@ func (s *WsServer) publishClientJoined(client *Client) {
 		Action: UserJoinedAction,
 		Sender: user,
 	}
-	if err := config.Redis.Publish(context.Background(), PubSubGeneralChannel, message.encode()).Err(); err != nil {
+	if err := s.pubsubRepo.Publish(context.Background(), PubSubGeneralChannel, message.encode()); err != nil {
 		log.Println(err)
 	}
 }
@@ -197,14 +198,14 @@ func (s *WsServer) publishClientLeft(client *Client) {
 		Action: UserLeftAction,
 		Sender: user,
 	}
-	if err := config.Redis.Publish(context.Background(), PubSubGeneralChannel, message.encode()).Err(); err != nil {
+	if err := s.pubsubRepo.Publish(context.Background(), PubSubGeneralChannel, message.encode()); err != nil {
 		log.Println(err)
 	}
 }
 
 // Listen to pub/sub general channels
 func (s *WsServer) listenPubSubChannel() {
-	pubsub := config.Redis.Subscribe(context.Background(), PubSubGeneralChannel)
+	pubsub := s.pubsubRepo.Subscribe(context.Background(), PubSubGeneralChannel)
 	defer pubsub.Close()
 
 	ch := pubsub.Channel()

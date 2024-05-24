@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"github.com/tusmasoma/simple-chat/config"
 	"github.com/tusmasoma/simple-chat/entity"
+	"github.com/tusmasoma/simple-chat/repository"
 )
 
 const (
@@ -40,22 +40,24 @@ var upgrader = websocket.Upgrader{
 // Client represents the websocket client at the server
 type Client struct {
 	// The actual websocket connection.
-	ID       uuid.UUID `json:"id"`
-	conn     *websocket.Conn
-	wsServer *WsServer
-	send     chan []byte
-	rooms    map[*Room]bool
-	Name     string `json:"name"`
+	ID         uuid.UUID `json:"id"`
+	conn       *websocket.Conn
+	wsServer   *WsServer
+	send       chan []byte
+	rooms      map[*Room]bool
+	Name       string `json:"name"`
+	pubsubRepo repository.PubSubRepository
 }
 
-func newClient(conn *websocket.Conn, wsServer *WsServer, name string) *Client {
+func newClient(conn *websocket.Conn, wsServer *WsServer, name string, pubsubRepo repository.PubSubRepository) *Client {
 	return &Client{
-		ID:       uuid.New(),
-		conn:     conn,
-		wsServer: wsServer,
-		send:     make(chan []byte, 256),
-		rooms:    make(map[*Room]bool),
-		Name:     name,
+		ID:         uuid.New(),
+		conn:       conn,
+		wsServer:   wsServer,
+		send:       make(chan []byte, 256),
+		rooms:      make(map[*Room]bool),
+		Name:       name,
+		pubsubRepo: pubsubRepo,
 	}
 }
 
@@ -224,7 +226,7 @@ func (client *Client) inviteTargetUser(target *Client, room *Room) {
 		Sender:  client.ToUser(),
 	}
 
-	if err := config.Redis.Publish(context.Background(), PubSubGeneralChannel, inviteMessage.encode()).Err(); err != nil {
+	if err := client.pubsubRepo.Publish(context.Background(), PubSubGeneralChannel, inviteMessage.encode()); err != nil {
 		log.Print(err)
 	}
 }
@@ -247,7 +249,7 @@ func (client *Client) notifyRoomJoined(room *Room, sender *entity.User) {
 }
 
 // ServeWs handles websocket requests from clients requests.
-func ServeWs(wsServer *WsServer, w http.ResponseWriter, r *http.Request) {
+func ServeWs(wsServer *WsServer, w http.ResponseWriter, r *http.Request, pubsubRepo repository.PubSubRepository) {
 
 	name, ok := r.URL.Query()["name"]
 	if !ok || len(name) < 1 {
@@ -261,7 +263,7 @@ func ServeWs(wsServer *WsServer, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := newClient(conn, wsServer, name[0])
+	client := newClient(conn, wsServer, name[0], pubsubRepo)
 
 	go client.writePump()
 	go client.readPump()

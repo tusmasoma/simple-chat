@@ -7,17 +7,14 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-var Redis *redis.Client
-
-func NewClient() {
+func NewClient() *redis.Client {
 	ctx := context.Background()
 	conf, err := NewCacheConfig(ctx)
 	if err != nil || conf == nil {
 		log.Printf("Failed to load cache config: %s\n", err)
-		//return nil
+		return nil
 	}
 
 	client := redis.NewClient(&redis.Options{Addr: conf.Addr, Password: conf.Password, DB: conf.DB})
-	Redis = client
-	//return client
+	return client
 }
