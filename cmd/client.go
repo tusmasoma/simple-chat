@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/tusmasoma/simple-chat/config"
 	"github.com/tusmasoma/simple-chat/entity"
 )
 
@@ -189,24 +191,41 @@ func (client *Client) handleJoinRoomPrivateMessage(message Message) {
 
 	roomName := message.Message + client.ID.String()
 
-	client.joinRoom(roomName, target.ToUser())
-	target.joinRoom(roomName, client.ToUser())
+	joinedRoom := client.joinRoom(roomName, target.ToUser())
+	if joinedRoom != nil {
+		client.inviteTargetUser(target, joinedRoom)
+	}
 }
 
-func (client *Client) joinRoom(roomName string, sender *entity.User) {
+func (client *Client) joinRoom(roomName string, sender *entity.User) *Room {
 	room := client.wsServer.findRoomByName(roomName)
 	if room == nil {
 		room = client.wsServer.createRoom(roomName, sender != nil)
 	}
 
 	if sender == nil && room.Private {
-		return
+		return nil
 	}
 
 	if !client.isInRoom(room) {
 		client.rooms[room] = true
 		room.register <- client
 		client.notifyRoomJoined(room, sender)
+	}
+	return room
+}
+
+// Send out invite message over pub/sub in the general channel
+func (client *Client) inviteTargetUser(target *Client, room *Room) {
+	inviteMessage := &Message{
+		Action:  JoinRoomPrivateAction,
+		Message: target.ID.String(),
+		Target:  room,
+		Sender:  client.ToUser(),
+	}
+
+	if err := config.Redis.Publish(context.Background(), PubSubGeneralChannel, inviteMessage.encode()).Err(); err != nil {
+		log.Print(err)
 	}
 }
 

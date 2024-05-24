@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 
 	"github.com/google/uuid"
+	"github.com/tusmasoma/simple-chat/config"
 )
 
 const welcomeMessage = "%s joined the room"
@@ -34,6 +37,9 @@ func NewRoom(name string, private bool) *Room {
 
 // Run starts the room and listens for incoming messages
 func (room *Room) Run() {
+	ctx := context.Background()
+	go room.subscribeToRoomMessages(ctx)
+
 	for {
 		select {
 
@@ -44,7 +50,7 @@ func (room *Room) Run() {
 			room.unregisterClientInRoom(client)
 
 		case message := <-room.broadcast:
-			room.broadcastToClientsInRoom(message.encode())
+			room.publishRoomMessage(ctx, message.encode())
 		}
 	}
 }
@@ -78,4 +84,22 @@ func (room *Room) notifyClientJoined(client *Client) {
 	}
 
 	room.broadcastToClientsInRoom(message.encode())
+}
+
+// TODO: ここでは、チャンネルをroomの名前にしている。一意せいないので命名考える
+func (room *Room) publishRoomMessage(ctx context.Context, message []byte) {
+	err := config.Redis.Publish(ctx, room.Name, message)
+	if err != nil {
+		log.Print(err)
+	}
+}
+
+func (room *Room) subscribeToRoomMessages(ctx context.Context) {
+	pubsub := config.Redis.Subscribe(ctx, room.Name)
+
+	ch := pubsub.Channel()
+
+	for msg := range ch {
+		room.broadcastToClientsInRoom([]byte(msg.Payload))
+	}
 }
