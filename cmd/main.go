@@ -13,12 +13,16 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
+	"github.com/tusmasoma/simple-chat/config"
 )
 
 func main() {
 	var addr string
 	flag.StringVar(&addr, "addr", ":8083", "tcp host:port to connect")
 	flag.Parse()
+
+	db := config.InitDB()
+	defer db.Close()
 
 	srv := &http.Server{
 		Addr:    addr,
