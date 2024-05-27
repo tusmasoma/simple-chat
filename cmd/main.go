@@ -76,11 +76,11 @@ func Init(ctx context.Context) *chi.Mux {
 		MaxAge:           300,
 	}))
 
-	wsServer := NewWebsocketServer(ctx, roomRepo, userRepo, pubsubRepo)
-	go wsServer.Run()
+	hub := NewHub(ctx, roomRepo, userRepo, pubsubRepo)
+	go hub.Run()
 
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		ServeWs(wsServer, w, r, pubsubRepo)
+		ServeWs(hub, w, r, pubsubRepo)
 	})
 
 	return r

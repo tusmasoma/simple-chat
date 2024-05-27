@@ -12,7 +12,7 @@ import (
 
 const PubSubGeneralChannel = "general"
 
-type WsServer struct {
+type Hub struct {
 	clients    map[*Client]bool
 	register   chan *Client
 	unregister chan *Client
@@ -25,8 +25,8 @@ type WsServer struct {
 }
 
 // NewWebsocketServer creates a new WsServer type
-func NewWebsocketServer(ctx context.Context, roomRepo repository.RoomRepository, userRepo repository.UserRepository, pubsubRepo repository.PubSubRepository) *WsServer {
-	wsServer := &WsServer{
+func NewHub(ctx context.Context, roomRepo repository.RoomRepository, userRepo repository.UserRepository, pubsubRepo repository.PubSubRepository) *Hub {
+	wsServer := &Hub{
 		clients:    make(map[*Client]bool),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
@@ -43,7 +43,7 @@ func NewWebsocketServer(ctx context.Context, roomRepo repository.RoomRepository,
 }
 
 // Run starts the server and listens for incoming messages
-func (s *WsServer) Run() {
+func (s *Hub) Run() {
 	go s.listenPubSubChannel()
 
 	for {
@@ -62,7 +62,7 @@ func (s *WsServer) Run() {
 	}
 }
 
-func (s *WsServer) registerClient(client *Client) {
+func (s *Hub) registerClient(client *Client) {
 	user := client.ToUser()
 	s.userRepo.AddUser(context.Background(), *user)
 
@@ -72,7 +72,7 @@ func (s *WsServer) registerClient(client *Client) {
 	s.clients[client] = true
 }
 
-func (s *WsServer) unregisterClient(client *Client) {
+func (s *Hub) unregisterClient(client *Client) {
 	if _, ok := s.clients[client]; ok {
 		delete(s.clients, client)
 
@@ -82,13 +82,13 @@ func (s *WsServer) unregisterClient(client *Client) {
 	}
 }
 
-func (s *WsServer) broadcastToClients(message []byte) {
+func (s *Hub) broadcastToClients(message []byte) {
 	for client := range s.clients {
 		client.send <- message
 	}
 }
 
-func (s *WsServer) findRoomByName(name string) *Room {
+func (s *Hub) findRoomByName(name string) *Room {
 	var foundRoom *Room
 	for room := range s.rooms {
 		if room.Name == name {
@@ -104,7 +104,7 @@ func (s *WsServer) findRoomByName(name string) *Room {
 	return foundRoom
 }
 
-func (s *WsServer) runRoomFromRepository(name string) *Room {
+func (s *Hub) runRoomFromRepository(name string) *Room {
 	var room *Room
 	roomEntity := s.roomRepo.FindRoomByName(context.Background(), name)
 	if roomEntity != nil {
@@ -117,7 +117,7 @@ func (s *WsServer) runRoomFromRepository(name string) *Room {
 	return room
 }
 
-func (s *WsServer) findRoomByID(id string) *Room {
+func (s *Hub) findRoomByID(id string) *Room {
 	for room := range s.rooms {
 		if room.ID.String() == id {
 			return room
@@ -126,7 +126,7 @@ func (s *WsServer) findRoomByID(id string) *Room {
 	return nil
 }
 
-func (s *WsServer) findClientByID(id string) *Client {
+func (s *Hub) findClientByID(id string) *Client {
 	for client := range s.clients {
 		if client.ID.String() == id {
 			return client
@@ -135,7 +135,7 @@ func (s *WsServer) findClientByID(id string) *Client {
 	return nil
 }
 
-func (s *WsServer) createRoom(name string, private bool) *Room {
+func (s *Hub) createRoom(name string, private bool) *Room {
 	room := NewRoom(name, private, s.pubsubRepo)
 
 	s.roomRepo.AddRoom(context.Background(), entity.Room{
@@ -149,7 +149,7 @@ func (s *WsServer) createRoom(name string, private bool) *Room {
 	return room
 }
 
-func (s *WsServer) notifyClientJoined(client *Client) {
+func (s *Hub) notifyClientJoined(client *Client) {
 	user := client.ToUser()
 	message := &Message{
 		Action:  UserJoinedAction,
@@ -159,7 +159,7 @@ func (s *WsServer) notifyClientJoined(client *Client) {
 	s.broadcastToClients(message.encode())
 }
 
-func (s *WsServer) notifyClientLeft(client *Client) {
+func (s *Hub) notifyClientLeft(client *Client) {
 	user := client.ToUser()
 	message := &Message{
 		Action:  UserLeftAction,
@@ -169,7 +169,7 @@ func (s *WsServer) notifyClientLeft(client *Client) {
 	s.broadcastToClients(message.encode())
 }
 
-func (s *WsServer) listOnlineClients(client *Client) {
+func (s *Hub) listOnlineClients(client *Client) {
 	for _, user := range s.users {
 		message := &Message{
 			Action: UserJoinedAction,
@@ -180,7 +180,7 @@ func (s *WsServer) listOnlineClients(client *Client) {
 }
 
 // PublishClientJoined publishes a message to the general channel when a client joins the server
-func (s *WsServer) publishClientJoined(client *Client) {
+func (s *Hub) publishClientJoined(client *Client) {
 	user := client.ToUser()
 	message := &Message{
 		Action: UserJoinedAction,
@@ -192,7 +192,7 @@ func (s *WsServer) publishClientJoined(client *Client) {
 }
 
 // PublishClientLeft publishes a message to the general channel when a client leaves the server
-func (s *WsServer) publishClientLeft(client *Client) {
+func (s *Hub) publishClientLeft(client *Client) {
 	user := client.ToUser()
 	message := &Message{
 		Action: UserLeftAction,
@@ -204,7 +204,7 @@ func (s *WsServer) publishClientLeft(client *Client) {
 }
 
 // Listen to pub/sub general channels
-func (s *WsServer) listenPubSubChannel() {
+func (s *Hub) listenPubSubChannel() {
 	pubsub := s.pubsubRepo.Subscribe(context.Background(), PubSubGeneralChannel)
 	defer pubsub.Close()
 
@@ -227,12 +227,12 @@ func (s *WsServer) listenPubSubChannel() {
 	}
 }
 
-func (s *WsServer) handleUserJoined(message Message) {
+func (s *Hub) handleUserJoined(message Message) {
 	s.users = append(s.users, message.Sender)
 	s.broadcastToClients(message.encode())
 }
 
-func (s *WsServer) handleUserLeft(message Message) {
+func (s *Hub) handleUserLeft(message Message) {
 	for i, user := range s.users {
 		if user.ID == message.Sender.ID {
 			s.users = append(s.users[:i], s.users[i+1:]...)
@@ -242,7 +242,7 @@ func (s *WsServer) handleUserLeft(message Message) {
 	s.broadcastToClients(message.encode())
 }
 
-func (s *WsServer) handleUserJoinPrivate(message Message) {
+func (s *Hub) handleUserJoinPrivate(message Message) {
 	target := s.findClientByID(message.Message)
 	if target != nil {
 		target.joinRoom(message.Target.Name, message.Sender)

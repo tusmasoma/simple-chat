@@ -42,18 +42,18 @@ type Client struct {
 	// The actual websocket connection.
 	ID         uuid.UUID `json:"id"`
 	conn       *websocket.Conn
-	wsServer   *WsServer
+	hub        *Hub
 	send       chan []byte
 	rooms      map[*Room]bool
 	Name       string `json:"name"`
 	pubsubRepo repository.PubSubRepository
 }
 
-func newClient(conn *websocket.Conn, wsServer *WsServer, name string, pubsubRepo repository.PubSubRepository) *Client {
+func newClient(conn *websocket.Conn, hub *Hub, name string, pubsubRepo repository.PubSubRepository) *Client {
 	return &Client{
 		ID:         uuid.New(),
 		conn:       conn,
-		wsServer:   wsServer,
+		hub:        hub,
 		send:       make(chan []byte, 256),
 		rooms:      make(map[*Room]bool),
 		Name:       name,
@@ -134,7 +134,7 @@ func (client *Client) writePump() {
 }
 
 func (client *Client) disconnect() {
-	client.wsServer.unregister <- client
+	client.hub.unregister <- client
 	for room := range client.rooms {
 		room.unregister <- client
 	}
@@ -155,7 +155,7 @@ func (client *Client) handleNewMessage(jsonMessage []byte) {
 	switch message.Action {
 	case SendMessageAction:
 		roomID := message.Target.ID.String()
-		if room := client.wsServer.findRoomByID(roomID); room != nil {
+		if room := client.hub.findRoomByID(roomID); room != nil {
 			room.broadcast <- &message
 		}
 	case JoinRoomAction:
@@ -174,7 +174,7 @@ func (client *Client) handleJoinRoomMessage(message Message) {
 }
 
 func (client *Client) handleLeaveRoomMessage(message Message) {
-	room := client.wsServer.findRoomByID(message.Message)
+	room := client.hub.findRoomByID(message.Message)
 	if room == nil {
 		return
 	}
@@ -186,7 +186,7 @@ func (client *Client) handleLeaveRoomMessage(message Message) {
 }
 
 func (client *Client) handleJoinRoomPrivateMessage(message Message) {
-	target := client.wsServer.findClientByID(message.Message)
+	target := client.hub.findClientByID(message.Message)
 	if target == nil {
 		return
 	}
@@ -200,9 +200,9 @@ func (client *Client) handleJoinRoomPrivateMessage(message Message) {
 }
 
 func (client *Client) joinRoom(roomName string, sender *entity.User) *Room {
-	room := client.wsServer.findRoomByName(roomName)
+	room := client.hub.findRoomByName(roomName)
 	if room == nil {
-		room = client.wsServer.createRoom(roomName, sender != nil)
+		room = client.hub.createRoom(roomName, sender != nil)
 	}
 
 	if sender == nil && room.Private {
@@ -249,7 +249,7 @@ func (client *Client) notifyRoomJoined(room *Room, sender *entity.User) {
 }
 
 // ServeWs handles websocket requests from clients requests.
-func ServeWs(wsServer *WsServer, w http.ResponseWriter, r *http.Request, pubsubRepo repository.PubSubRepository) {
+func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, pubsubRepo repository.PubSubRepository) {
 
 	name, ok := r.URL.Query()["name"]
 	if !ok || len(name) < 1 {
@@ -263,10 +263,10 @@ func ServeWs(wsServer *WsServer, w http.ResponseWriter, r *http.Request, pubsubR
 		return
 	}
 
-	client := newClient(conn, wsServer, name[0], pubsubRepo)
+	client := newClient(conn, hub, name[0], pubsubRepo)
 
 	go client.writePump()
 	go client.readPump()
 
-	wsServer.register <- client
+	hub.register <- client
 }
