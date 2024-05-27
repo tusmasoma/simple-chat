@@ -2,7 +2,7 @@ package entity
 
 import "github.com/google/uuid"
 
-type User struct {
+type Client struct {
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
 }

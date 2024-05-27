@@ -19,20 +19,23 @@ func NewRoomRepository(db *sql.DB) repository.RoomRepository {
 	}
 }
 
-func (repo *roomRepository) AddRoom(ctx context.Context, room entity.Room) {
-	stmt, err := repo.db.Prepare("INSERT INTO room(id, name, private) values(?, ?, ?)")
+func (rr *roomRepository) Create(ctx context.Context, room entity.Room) error {
+	stmt, err := rr.db.Prepare("INSERT INTO rooms(id, name, private) values(?, ?, ?)")
 	if err != nil {
 		log.Println(err)
+		return err
 	}
 	_, err = stmt.ExecContext(ctx, room.ID, room.Name, room.Private)
 	if err != nil {
 		log.Println(err)
+		return err
 	}
+	return nil
 }
 
-func (repo *roomRepository) FindRoomByName(ctx context.Context, name string) *entity.Room {
+func (rr *roomRepository) Get(ctx context.Context, name string) *entity.Room {
 	var room entity.Room
-	row := repo.db.QueryRowContext(ctx, "SELECT id, name, private FROM room WHERE name = ? LIMIT 1", name)
+	row := rr.db.QueryRowContext(ctx, "SELECT id, name, private FROM rooms WHERE name = ? LIMIT 1", name)
 
 	if err := row.Scan(&room.ID, &room.Name, &room.Private); err != nil {
 		log.Println(err)

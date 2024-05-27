@@ -7,6 +7,6 @@ import (
 )
 
 type RoomRepository interface {
-	AddRoom(ctx context.Context, room entity.Room)
-	FindRoomByName(ctx context.Context, name string) *entity.Room
+	Create(ctx context.Context, room entity.Room) error
+	Get(ctx context.Context, name string) *entity.Room // TODO: Change to ID
 }
