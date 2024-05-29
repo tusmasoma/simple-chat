@@ -7,8 +7,8 @@ import (
 )
 
 type ClientRepository interface {
-	Create(ctx context.Context, client entity.Client)
-	Delete(ctx context.Context, client entity.Client)
-	Get(ctx context.Context, ID string) *entity.Client
-	List(ctx context.Context) []*entity.Client
+	Create(ctx context.Context, client entity.Client) error
+	Delete(ctx context.Context, id string) error
+	Get(ctx context.Context, id string) (*entity.Client, error)
+	List(ctx context.Context) ([]*entity.Client, error)
 }

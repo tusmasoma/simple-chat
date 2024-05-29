@@ -10,8 +10,6 @@ import (
 	"github.com/tusmasoma/simple-chat/repository"
 )
 
-const PubSubGeneralChannel = "general"
-
 type Hub struct {
 	clients    map[*Client]bool
 	register   chan *Client
@@ -176,30 +174,6 @@ func (h *Hub) listOnlineClients(client *Client) {
 			Sender: user,
 		}
 		client.send <- message.encode()
-	}
-}
-
-// PublishClientJoined publishes a message to the general channel when a client joins the server
-func (h *Hub) publishClientJoined(client *Client) {
-	user := client.ToUser()
-	message := &Message{
-		Action: UserJoinedAction,
-		Sender: user,
-	}
-	if err := h.pubsubRepo.Publish(context.Background(), PubSubGeneralChannel, message.encode()); err != nil {
-		log.Println(err)
-	}
-}
-
-// PublishClientLeft publishes a message to the general channel when a client leaves the server
-func (h *Hub) publishClientLeft(client *Client) {
-	user := client.ToUser()
-	message := &Message{
-		Action: UserLeftAction,
-		Sender: user,
-	}
-	if err := h.pubsubRepo.Publish(context.Background(), PubSubGeneralChannel, message.encode()); err != nil {
-		log.Println(err)
 	}
 }
 

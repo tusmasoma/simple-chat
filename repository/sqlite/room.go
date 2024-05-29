@@ -33,13 +33,13 @@ func (rr *roomRepository) Create(ctx context.Context, room entity.Room) error {
 	return nil
 }
 
-func (rr *roomRepository) Get(ctx context.Context, name string) *entity.Room {
+func (rr *roomRepository) Get(ctx context.Context, name string) (*entity.Room, error) {
 	var room entity.Room
 	row := rr.db.QueryRowContext(ctx, "SELECT id, name, private FROM rooms WHERE name = ? LIMIT 1", name)
 
 	if err := row.Scan(&room.ID, &room.Name, &room.Private); err != nil {
 		log.Println(err)
-		return nil
+		return nil, err
 	}
-	return &room
+	return &room, nil
 }
