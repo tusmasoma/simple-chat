@@ -1,4 +1,4 @@
-package main
+package websocket
 
 import (
 	"context"
@@ -6,24 +6,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/tusmasoma/simple-chat/config"
 	"github.com/tusmasoma/simple-chat/entity"
 	"github.com/tusmasoma/simple-chat/repository"
-)
-
-const (
-	// Max wait time when writing a message to the peer.
-	writeWait = 10 * time.Second
-
-	// Max wait time for the peer to read the next pong message.
-	pongWait = 60 * time.Second
-
-	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
-
-	// Max message size allowed from peer.
-	maxMessageSize = 10000
 )
 
 var (
@@ -31,45 +17,32 @@ var (
 	space   = []byte{' '}
 )
 
-// Client represents the websocket client at the server
 type Client struct {
-	// The actual websocket connection.
-	ID         uuid.UUID `json:"id"`
-	conn       *websocket.Conn
-	hub        *Hub
-	send       chan []byte
-	rooms      map[*Room]bool
+	ID         string `json:"id"`
 	Name       string `json:"name"`
+	hub        *Hub
+	rooms      map[*Room]bool
+	conn       *websocket.Conn
+	send       chan []byte
 	pubsubRepo repository.PubSubRepository
 }
 
-func newClient(conn *websocket.Conn, hub *Hub, name string, pubsubRepo repository.PubSubRepository) *Client {
+func NewClientWebSocketRepository(conn *websocket.Conn, hub *Hub, pubsubRepo repository.PubSubRepository) repository.ClientWebSocketRepository {
 	return &Client{
-		ID:         uuid.New(),
 		conn:       conn,
 		hub:        hub,
-		send:       make(chan []byte, 256),
-		rooms:      make(map[*Room]bool),
-		Name:       name,
 		pubsubRepo: pubsubRepo,
 	}
 }
 
-func (c *Client) ToUser() *entity.User {
-	return &entity.User{
-		ID:   c.ID,
-		Name: c.Name,
-	}
-}
-
-func (client *Client) readPump() {
+func (client *Client) ReadPump() {
 	defer func() {
 		client.disconnect()
 	}()
 
-	client.conn.SetReadLimit(maxMessageSize)
-	client.conn.SetReadDeadline(time.Now().Add(pongWait))
-	client.conn.SetPongHandler(func(string) error { client.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	client.conn.SetReadLimit(config.MaxMessageSize)
+	client.conn.SetReadDeadline(time.Now().Add(config.PongWait))
+	client.conn.SetPongHandler(func(string) error { client.conn.SetReadDeadline(time.Now().Add(config.PongWait)); return nil })
 
 	// Start endless read loop, waiting for messages from client
 	for {
@@ -86,8 +59,8 @@ func (client *Client) readPump() {
 
 }
 
-func (client *Client) writePump() {
-	ticker := time.NewTicker(pingPeriod)
+func (client *Client) WritePump() {
+	ticker := time.NewTicker(config.PingPeriod)
 	defer func() {
 		ticker.Stop()
 		client.conn.Close()
@@ -95,7 +68,7 @@ func (client *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-client.send:
-			client.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			client.conn.SetWriteDeadline(time.Now().Add(config.WriteWait))
 			if !ok {
 				// The WsServer closed the channel.
 				client.conn.WriteMessage(websocket.CloseMessage, []byte{})
@@ -119,7 +92,7 @@ func (client *Client) writePump() {
 				return
 			}
 		case <-ticker.C:
-			client.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			client.conn.SetWriteDeadline(time.Now().Add(config.WriteWait))
 			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
@@ -137,38 +110,38 @@ func (client *Client) disconnect() {
 }
 
 func (client *Client) handleNewMessage(jsonMessage []byte) {
-	var message Message
+	var message entity.Message
 	if err := json.Unmarshal(jsonMessage, &message); err != nil {
 		log.Printf("Error on unmarshalling JSON message: %v", err)
 		return
 	}
 
 	// Attach the client object as the sender of the message.
-	message.Sender = client.ToUser()
+	message.SenderID = client.ID
 
 	switch message.Action {
-	case SendMessageAction:
-		roomID := message.Target.ID.String()
+	case config.SendMessageAction:
+		roomID := message.TargetID
 		if room := client.hub.findRoomByID(roomID); room != nil {
 			room.broadcast <- &message
 		}
-	case JoinRoomAction:
+	case config.JoinRoomAction:
 		client.handleJoinRoomMessage(message)
-	case LeaveRoomAction:
+	case config.LeaveRoomAction:
 		client.handleLeaveRoomMessage(message)
-	case JoinRoomPrivateAction:
+	case config.JoinRoomPrivateAction:
 		client.handleJoinRoomMessage(message)
 	}
 }
 
-func (client *Client) handleJoinRoomMessage(message Message) {
-	roomName := message.Message
+func (client *Client) handleJoinRoomMessage(message entity.Message) {
+	roomName := message.Content
 
 	client.joinRoom(roomName, nil)
 }
 
-func (client *Client) handleLeaveRoomMessage(message Message) {
-	room := client.hub.findRoomByID(message.Message)
+func (client *Client) handleLeaveRoomMessage(message entity.Message) {
+	room := client.hub.findRoomByID(message.Content)
 	if room == nil {
 		return
 	}
@@ -179,21 +152,21 @@ func (client *Client) handleLeaveRoomMessage(message Message) {
 	room.unregister <- client
 }
 
-func (client *Client) handleJoinRoomPrivateMessage(message Message) {
-	target := client.hub.findClientByID(message.Message)
+func (client *Client) handleJoinRoomPrivateMessage(message entity.Message) {
+	target := client.hub.findClientByID(message.Content)
 	if target == nil {
 		return
 	}
 
-	roomName := message.Message + client.ID.String()
+	roomName := message.Content + client.ID
 
-	joinedRoom := client.joinRoom(roomName, target.ToUser())
+	joinedRoom := client.joinRoom(roomName, target)
 	if joinedRoom != nil {
 		client.inviteTargetUser(target, joinedRoom)
 	}
 }
 
-func (client *Client) joinRoom(roomName string, sender *entity.User) *Room {
+func (client *Client) joinRoom(roomName string, sender *Client) *Room {
 	room := client.hub.findRoomByName(roomName)
 	if room == nil {
 		room = client.hub.createRoom(roomName, sender != nil)
@@ -213,14 +186,14 @@ func (client *Client) joinRoom(roomName string, sender *entity.User) *Room {
 
 // Send out invite message over pub/sub in the general channel
 func (client *Client) inviteTargetUser(target *Client, room *Room) {
-	inviteMessage := &Message{
-		Action:  JoinRoomPrivateAction,
-		Message: target.ID.String(),
-		Target:  room,
-		Sender:  client.ToUser(),
+	inviteMessage := &entity.Message{
+		Action:   config.JoinRoomPrivateAction,
+		Content:  target.ID,
+		TargetID: room.ID,
+		SenderID: client.ID,
 	}
 
-	if err := client.pubsubRepo.Publish(context.Background(), PubSubGeneralChannel, inviteMessage.encode()); err != nil {
+	if err := client.pubsubRepo.Publish(context.Background(), config.PubSubGeneralChannel, inviteMessage.Encode()); err != nil {
 		log.Print(err)
 	}
 }
@@ -232,12 +205,12 @@ func (client *Client) isInRoom(room *Room) bool {
 	return false
 }
 
-func (client *Client) notifyRoomJoined(room *Room, sender *entity.User) {
-	message := Message{
-		Action: RoomJoinedAction,
-		Target: room,
-		Sender: sender,
+func (client *Client) notifyRoomJoined(room *Room, sender *Client) {
+	message := entity.Message{
+		Action:   config.RoomJoinedAction,
+		TargetID: room.ID,
+		SenderID: sender.ID,
 	}
 
-	client.send <- message.encode()
+	client.send <- message.Encode()
 }

@@ -1,4 +1,4 @@
-package main
+package websocket
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/tusmasoma/simple-chat/config"
 	"github.com/tusmasoma/simple-chat/entity"
 	"github.com/tusmasoma/simple-chat/repository"
 )
@@ -16,15 +17,15 @@ type Hub struct {
 	unregister chan *Client
 	broadcast  chan []byte
 	rooms      map[*Room]bool
-	users      []*entity.User
 	roomRepo   repository.RoomRepository
 	userRepo   repository.UserRepository
 	pubsubRepo repository.PubSubRepository
+	users      []*entity.User
 }
 
 // NewWebsocketServer creates a new WsServer type
-func NewHub(ctx context.Context, roomRepo repository.RoomRepository, userRepo repository.UserRepository, pubsubRepo repository.PubSubRepository) *Hub {
-	wsServer := &Hub{
+func NewHubWebSocketRepository(ctx context.Context, roomRepo repository.RoomRepository, userRepo repository.UserRepository, pubsubRepo repository.PubSubRepository) repository.HubWebSocketRepository {
+	hub := &Hub{
 		clients:    make(map[*Client]bool),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
@@ -35,9 +36,9 @@ func NewHub(ctx context.Context, roomRepo repository.RoomRepository, userRepo re
 		pubsubRepo: pubsubRepo,
 	}
 
-	wsServer.users = userRepo.GetAllUsers(ctx)
+	hub.users, _ = userRepo.List(ctx)
 
-	return wsServer
+	return hub
 }
 
 // Run starts the server and listens for incoming messages
@@ -61,10 +62,15 @@ func (h *Hub) Run() {
 }
 
 func (h *Hub) registerClient(client *Client) {
-	user := client.ToUser()
-	h.userRepo.AddUser(context.Background(), *user)
+	h.userRepo.Create(
+		context.Background(),
+		entity.User{
+			ID:   client.ID,
+			Name: client.Name,
+		},
+	)
 
-	h.publishClientJoined(client)
+	h.publishClientJoined(context.Background(), client)
 
 	h.listOnlineClients(client)
 	h.clients[client] = true
@@ -74,9 +80,9 @@ func (h *Hub) unregisterClient(client *Client) {
 	if _, ok := h.clients[client]; ok {
 		delete(h.clients, client)
 
-		h.userRepo.RemoveUser(context.Background(), *client.ToUser())
+		h.userRepo.Delete(context.Background(), client.ID)
 
-		h.publishClientLeft(client)
+		h.publishClientLeft(context.Background(), client)
 	}
 }
 
@@ -84,6 +90,44 @@ func (h *Hub) broadcastToClients(message []byte) {
 	for client := range h.clients {
 		client.send <- message
 	}
+}
+
+func (h *Hub) publishClientJoined(ctx context.Context, client *Client) error {
+	if err := h.userRepo.Create(ctx, entity.User{
+		ID:   client.ID,
+		Name: client.Name,
+	}); err != nil {
+		log.Println(err)
+		return err
+	}
+
+	message := &entity.Message{
+		Action:   config.UserJoinedAction,
+		SenderID: client.ID,
+	}
+	if err := h.pubsubRepo.Publish(ctx, config.PubSubGeneralChannel, message.Encode()); err != nil {
+		log.Println(err)
+		return err
+	}
+	return nil
+}
+
+// PublishClientLeft publishes a message to the general channel when a client leaves the server
+func (h *Hub) publishClientLeft(ctx context.Context, client *Client) error {
+	if err := h.userRepo.Delete(ctx, client.ID); err != nil {
+		log.Println(err)
+		return err
+	}
+
+	message := &entity.Message{
+		Action:   config.UserLeftAction,
+		SenderID: client.ID,
+	}
+	if err := h.pubsubRepo.Publish(ctx, config.PubSubGeneralChannel, message.Encode()); err != nil {
+		log.Println(err)
+		return err
+	}
+	return nil
 }
 
 func (h *Hub) findRoomByName(name string) *Room {
@@ -104,7 +148,7 @@ func (h *Hub) findRoomByName(name string) *Room {
 
 func (h *Hub) runRoomFromRepository(name string) *Room {
 	var room *Room
-	roomEntity := h.roomRepo.FindRoomByName(context.Background(), name)
+	roomEntity, _ := h.roomRepo.Get(context.Background(), name)
 	if roomEntity != nil {
 		room = NewRoom(roomEntity.Name, roomEntity.Private, h.pubsubRepo)
 		room.ID = roomEntity.ID
@@ -117,7 +161,7 @@ func (h *Hub) runRoomFromRepository(name string) *Room {
 
 func (h *Hub) findRoomByID(id string) *Room {
 	for room := range h.rooms {
-		if room.ID.String() == id {
+		if room.ID == id {
 			return room
 		}
 	}
@@ -126,7 +170,7 @@ func (h *Hub) findRoomByID(id string) *Room {
 
 func (h *Hub) findClientByID(id string) *Client {
 	for client := range h.clients {
-		if client.ID.String() == id {
+		if client.ID == id {
 			return client
 		}
 	}
@@ -136,7 +180,7 @@ func (h *Hub) findClientByID(id string) *Client {
 func (h *Hub) createRoom(name string, private bool) *Room {
 	room := NewRoom(name, private, h.pubsubRepo)
 
-	h.roomRepo.AddRoom(context.Background(), entity.Room{
+	h.roomRepo.Create(context.Background(), entity.Room{
 		ID:      room.ID,
 		Name:    room.Name,
 		Private: room.Private,
@@ -148,77 +192,82 @@ func (h *Hub) createRoom(name string, private bool) *Room {
 }
 
 func (h *Hub) notifyClientJoined(client *Client) {
-	user := client.ToUser()
-	message := &Message{
-		Action:  UserJoinedAction,
-		Message: fmt.Sprintf(welcomeMessage, client.Name),
-		Sender:  user,
+	message := &entity.Message{
+		Action:   config.UserJoinedAction,
+		Content:  fmt.Sprintf(config.WelcomeMessage, client.Name),
+		SenderID: client.ID,
 	}
-	h.broadcastToClients(message.encode())
+	h.broadcastToClients(message.Encode())
 }
 
 func (h *Hub) notifyClientLeft(client *Client) {
-	user := client.ToUser()
-	message := &Message{
-		Action:  UserLeftAction,
-		Message: fmt.Sprintf(goodbyeMessage, client.Name),
-		Sender:  user,
+	message := &entity.Message{
+		Action:   config.UserLeftAction,
+		Content:  fmt.Sprintf(config.GoodbyeMessage, client.Name),
+		SenderID: client.ID,
 	}
-	h.broadcastToClients(message.encode())
+	h.broadcastToClients(message.Encode())
 }
 
 func (h *Hub) listOnlineClients(client *Client) {
 	for _, user := range h.users {
-		message := &Message{
-			Action: UserJoinedAction,
-			Sender: user,
+		message := &entity.Message{
+			Action:   config.UserJoinedAction,
+			SenderID: user.ID,
 		}
-		client.send <- message.encode()
+		client.send <- message.Encode()
 	}
 }
 
 // Listen to pub/sub general channels
 func (h *Hub) listenPubSubChannel() {
-	pubsub := h.pubsubRepo.Subscribe(context.Background(), PubSubGeneralChannel)
+	pubsub := h.pubsubRepo.Subscribe(context.Background(), config.PubSubGeneralChannel)
 	defer pubsub.Close()
 
 	ch := pubsub.Channel()
 	for msg := range ch {
-		var message Message
+		var message entity.Message
 		if err := json.Unmarshal([]byte(msg.Payload), &message); err != nil {
 			log.Println(err)
 			continue
 		}
 
 		switch message.Action {
-		case UserJoinedAction:
+		case config.UserJoinedAction:
 			h.handleUserJoined(message)
-		case UserLeftAction:
+		case config.UserLeftAction:
 			h.handleUserLeft(message)
-		case JoinRoomPrivateAction:
+		case config.JoinRoomPrivateAction:
 			h.handleUserJoinPrivate(message)
 		}
 	}
 }
 
-func (h *Hub) handleUserJoined(message Message) {
-	h.users = append(h.users, message.Sender)
-	h.broadcastToClients(message.encode())
+func (h *Hub) handleUserJoined(message entity.Message) {
+	user, err := h.userRepo.Get(context.Background(), message.SenderID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	h.users = append(h.users, user)
+	h.broadcastToClients(message.Encode())
 }
 
-func (h *Hub) handleUserLeft(message Message) {
+func (h *Hub) handleUserLeft(message entity.Message) {
 	for i, user := range h.users {
-		if user.ID == message.Sender.ID {
+		if user.ID == message.SenderID {
 			h.users = append(h.users[:i], h.users[i+1:]...)
 			break
 		}
 	}
-	h.broadcastToClients(message.encode())
+	h.broadcastToClients(message.Encode())
 }
 
-func (h *Hub) handleUserJoinPrivate(message Message) {
-	target := h.findClientByID(message.Message)
+func (h *Hub) handleUserJoinPrivate(message entity.Message) {
+	target := h.findClientByID(message.Content)
 	if target != nil {
-		target.joinRoom(message.Target.Name, message.Sender)
+		room := h.findRoomByID(message.TargetID)
+		client := h.findClientByID(message.SenderID)
+		target.joinRoom(room.Name, client)
 	}
 }

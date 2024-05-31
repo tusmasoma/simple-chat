@@ -16,6 +16,7 @@ import (
 	"github.com/tusmasoma/simple-chat/config"
 	"github.com/tusmasoma/simple-chat/repository/redis"
 	"github.com/tusmasoma/simple-chat/repository/sqlite"
+	"github.com/tusmasoma/simple-chat/repository/websocket"
 )
 
 func main() {
@@ -66,6 +67,8 @@ func Init(ctx context.Context) *chi.Mux {
 
 	pubsubRepo := redis.NewPubSubRepository(client)
 
+	hub := websocket.NewHubWebSocketRepository(ctx, roomRepo, userRepo, pubsubRepo)
+
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*"},
@@ -76,11 +79,10 @@ func Init(ctx context.Context) *chi.Mux {
 		MaxAge:           300,
 	}))
 
-	hub := NewHub(ctx, roomRepo, userRepo, pubsubRepo)
 	go hub.Run()
 
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		ServeWs(hub, w, r, pubsubRepo)
+		//ServeWs(hub, w, r, pubsubRepo)
 	})
 
 	return r

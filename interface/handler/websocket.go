@@ -19,7 +19,7 @@ func NewWebsocketHandler() *WebsocketHandler {
 	return &WebsocketHandler{}
 }
 
-func (h *WebsocketHandler) WebSocketConnection(hub *Hub, w http.ResponseWriter, r *http.Request, pubsubRepo repository.PubSubRepository) {
+func (h *WebsocketHandler) WebSocketConnection(hub repository.HubWebSocketRepository, w http.ResponseWriter, r *http.Request, pubsubRepo repository.PubSubRepository) {
 
 	name, ok := r.URL.Query()["name"]
 	if !ok || len(name) < 1 {
@@ -27,16 +27,16 @@ func (h *WebsocketHandler) WebSocketConnection(hub *Hub, w http.ResponseWriter, 
 		return
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	_, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	client := newClient(conn, hub, name[0], pubsubRepo)
+	//client := ws.NewClientWebSocketRepository(conn, hub)
 
-	go client.writePump()
-	go client.readPump()
+	//go client.WritePump()
+	//go client.ReadPump()
 
-	hub.register <- client
+	//hub.register <- client
 }

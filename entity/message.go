@@ -5,12 +5,18 @@ import (
 	"log"
 )
 
+//type Message struct {
+//	Action  string  `json:"action"`
+//	Content string  `json:"content"`
+//	Target  *Room   `json:"target"`
+//	Sender  *Client `json:"sender"`
+//}
+
 type Message struct {
-	ID       string `json:"id"`
-	RoomID   string `json:"room_id"`
-	ClientID string `json:"client_id"`
-	Content  string `json:"content"`
 	Action   string `json:"action"`
+	Content  string `json:"content"`
+	TargetID string `json:"target"`
+	SenderID string `json:"sender"`
 }
 
 func (message *Message) Encode() []byte {

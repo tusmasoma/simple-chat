@@ -1,4 +1,4 @@
-package main
+package websocket
 
 import (
 	"context"
@@ -6,33 +6,45 @@ import (
 	"log"
 
 	"github.com/google/uuid"
+	"github.com/tusmasoma/simple-chat/config"
+	"github.com/tusmasoma/simple-chat/entity"
 	"github.com/tusmasoma/simple-chat/repository"
 )
 
-const welcomeMessage = "%s joined the room"
-const goodbyeMessage = "%s left the room"
-
 type Room struct {
-	ID         uuid.UUID `json:"id"`
-	Name       string    `json:"name"`
-	Private    bool      `json:"private"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
 	clients    map[*Client]bool
 	register   chan *Client
 	unregister chan *Client
-	broadcast  chan *Message
+	broadcast  chan *entity.Message
+	Private    bool `json:"private"`
 	pubsubRepo repository.PubSubRepository
 }
 
-// NewRoom creates a new Room
-func NewRoom(name string, private bool, pubsubRepo repository.PubSubRepository) *Room {
+func NewRoom(name string, private bool, pubsub repository.PubSubRepository) *Room {
 	return &Room{
-		ID:         uuid.New(),
+		ID:         uuid.New().String(),
+		Name:       name,
+		clients:    make(map[*Client]bool),
+		register:   make(chan *Client),
+		unregister: make(chan *Client),
+		broadcast:  make(chan *entity.Message),
+		Private:    private,
+		pubsubRepo: pubsub,
+	}
+}
+
+// NewRoom creates a new Room
+func NewRoomWebSocketRepository(name string, private bool, pubsubRepo repository.PubSubRepository) repository.RoomWebSocketRepository {
+	return &Room{
+		ID:         uuid.New().String(),
 		Name:       name,
 		Private:    private,
 		clients:    make(map[*Client]bool),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
-		broadcast:  make(chan *Message),
+		broadcast:  make(chan *entity.Message),
 		pubsubRepo: pubsubRepo,
 	}
 }
@@ -52,7 +64,7 @@ func (room *Room) Run() {
 			room.unregisterClientInRoom(client)
 
 		case message := <-room.broadcast:
-			room.publishRoomMessage(ctx, message.encode())
+			room.publishRoomMessage(ctx, message.Encode())
 		}
 	}
 }
@@ -77,15 +89,14 @@ func (room *Room) broadcastToClientsInRoom(message []byte) {
 }
 
 func (room *Room) notifyClientJoined(client *Client) {
-	user := client.ToUser()
-	message := &Message{
-		Action:  SendMessageAction,
-		Message: fmt.Sprintf(welcomeMessage, client.Name),
-		Target:  room,
-		Sender:  user,
+	message := &entity.Message{
+		Action:   config.SendMessageAction,
+		Content:  fmt.Sprintf(config.WelcomeMessage, client.Name),
+		TargetID: room.ID,
+		SenderID: client.ID,
 	}
 
-	room.broadcastToClientsInRoom(message.encode())
+	room.broadcastToClientsInRoom(message.Encode())
 }
 
 // TODO: ここでは、チャンネルをroomの名前にしている。一意せいないので命名考える
