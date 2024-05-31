@@ -13,13 +13,19 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 4096,
 }
 
-type WebsocketHandler struct{}
-
-func NewWebsocketHandler() *WebsocketHandler {
-	return &WebsocketHandler{}
+type WebsocketHandler struct {
+	hub    repository.HubWebSocketRepository
+	client repository.ClientWebSocketRepository
 }
 
-func (h *WebsocketHandler) WebSocketConnection(hub repository.HubWebSocketRepository, w http.ResponseWriter, r *http.Request, pubsubRepo repository.PubSubRepository) {
+func NewWebsocketHandler(hub repository.HubWebSocketRepository, client repository.ClientWebSocketRepository) *WebsocketHandler {
+	return &WebsocketHandler{
+		hub:    hub,
+		client: client,
+	}
+}
+
+func (h *WebsocketHandler) WebSocketConnection(w http.ResponseWriter, r *http.Request) {
 
 	name, ok := r.URL.Query()["name"]
 	if !ok || len(name) < 1 {
@@ -33,10 +39,8 @@ func (h *WebsocketHandler) WebSocketConnection(hub repository.HubWebSocketReposi
 		return
 	}
 
-	//client := ws.NewClientWebSocketRepository(conn, hub)
-
-	//go client.WritePump()
-	//go client.ReadPump()
+	go h.client.WritePump()
+	go h.client.ReadPump()
 
 	//hub.register <- client
 }
