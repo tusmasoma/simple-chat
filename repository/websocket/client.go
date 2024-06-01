@@ -27,8 +27,10 @@ type Client struct {
 	pubsubRepo repository.PubSubRepository
 }
 
-func NewClientWebSocketRepository(conn *websocket.Conn, hub *Hub, pubsubRepo repository.PubSubRepository) repository.ClientWebSocketRepository {
+func NewClientWebSocketRepository(conn *websocket.Conn, hub *Hub, name string, id string, pubsubRepo repository.PubSubRepository) repository.ClientWebSocketRepository {
 	return &Client{
+		ID:         id,
+		Name:       name,
 		conn:       conn,
 		hub:        hub,
 		pubsubRepo: pubsubRepo,

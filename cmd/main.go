@@ -15,9 +15,11 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/tusmasoma/simple-chat/config"
 	"github.com/tusmasoma/simple-chat/interface/handler"
+	"github.com/tusmasoma/simple-chat/interface/middleware"
 	"github.com/tusmasoma/simple-chat/repository/redis"
 	"github.com/tusmasoma/simple-chat/repository/sqlite"
 	"github.com/tusmasoma/simple-chat/repository/websocket"
+	"github.com/tusmasoma/simple-chat/usecase"
 )
 
 func main() {
@@ -64,13 +66,19 @@ func Init(ctx context.Context) *chi.Mux {
 	cacheClient := config.NewClient()
 
 	userRepo := sqlite.NewUserRepository(db)
+	userCacehRepo := redis.NewUserRepository(cacheClient)
 	roomRepo := sqlite.NewRoomRepository(db)
 
 	pubsubRepo := redis.NewPubSubRepository(cacheClient)
 
 	hub := websocket.NewHubWebSocketRepository(ctx, roomRepo, userRepo, pubsubRepo)
 
-	handler := handler.NewWebsocketHandler(hub, nil)
+	userUseCase := usecase.NewUserUseCase(userRepo, userCacehRepo)
+
+	wsHandler := handler.NewWebsocketHandler(hub, nil)
+	userHandler := handler.NewUserHandler(userUseCase)
+
+	authMiddleware := middleware.NewAuthMiddleware(userCacehRepo)
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
@@ -84,9 +92,16 @@ func Init(ctx context.Context) *chi.Mux {
 
 	go hub.Run()
 
-	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handler.WebSocketConnection(w, r)
+	r.Route("/", func(r chi.Router) {
+		r.Group(func(r chi.Router) {
+			r.Use(authMiddleware.Authenticate)
+			r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
+				wsHandler.WebSocketConnection(w, r)
+			})
+		})
 	})
+
+	r.Get("/api/login", userHandler.Login)
 
 	return r
 }
