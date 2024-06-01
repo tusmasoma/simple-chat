@@ -5,13 +5,6 @@ import (
 	"log"
 )
 
-//type Message struct {
-//	Action  string  `json:"action"`
-//	Content string  `json:"content"`
-//	Target  *Room   `json:"target"`
-//	Sender  *Client `json:"sender"`
-//}
-
 type Message struct {
 	Action   string `json:"action"`
 	Content  string `json:"content"`
