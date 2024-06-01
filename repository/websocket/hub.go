@@ -80,8 +80,6 @@ func (h *Hub) unregisterClient(client *Client) {
 	if _, ok := h.clients[client]; ok {
 		delete(h.clients, client)
 
-		h.userRepo.Delete(context.Background(), client.ID)
-
 		h.publishClientLeft(context.Background(), client)
 	}
 }
@@ -210,12 +208,16 @@ func (h *Hub) notifyClientLeft(client *Client) {
 }
 
 func (h *Hub) listOnlineClients(client *Client) {
+	var uniqueUsers = make(map[string]bool)
 	for _, user := range h.users {
-		message := &entity.Message{
-			Action:   config.UserJoinedAction,
-			SenderID: user.ID,
+		if ok := uniqueUsers[user.ID]; !ok {
+			message := &entity.Message{
+				Action:   config.UserJoinedAction,
+				SenderID: user.ID,
+			}
+			uniqueUsers[user.ID] = true
+			client.send <- message.Encode()
 		}
-		client.send <- message.Encode()
 	}
 }
 
@@ -264,10 +266,21 @@ func (h *Hub) handleUserLeft(message entity.Message) {
 }
 
 func (h *Hub) handleUserJoinPrivate(message entity.Message) {
-	target := h.findClientByID(message.Content)
-	if target != nil {
+	targetClients := h.findClientsByID(message.Content)
+	for _, targetClient := range targetClients {
 		room := h.findRoomByID(message.TargetID)
 		client := h.findClientByID(message.SenderID)
-		target.joinRoom(room.Name, client)
+		targetClient.joinRoom(room.Name, client)
 	}
+}
+
+func (h *Hub) findClientsByID(ID string) []*Client {
+	var foundClients []*Client
+	for client := range h.clients {
+		if client.ID == ID {
+			foundClients = append(foundClients, client)
+		}
+	}
+
+	return foundClients
 }
